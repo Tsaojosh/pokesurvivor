@@ -19,7 +19,17 @@
  *       peers() · mode(uid) -> 'connecting' | 'direct' | 'relay' | 'closed'
  */
 G.Net = (() => {
-  const ICE = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  const ICE = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  {
+    urls: [
+      'turn:free.expressturn.com:3478?transport=udp',
+      'turn:free.expressturn.com:3478?transport=tcp'
+    ],
+    username: '貼上 Username',
+    credential: '貼上 Password'
+  }
+  ];
   const DIRECT_TIMEOUT = 9000;     // ms para conseguir canal directo antes de usar el relé
   // Relé por la Realtime Database APAGADO (12-10-2026): a 1 $ el GB era lo que más
   // costaba del cooperativo. Sin conexión directa, esa pareja no puede jugar
