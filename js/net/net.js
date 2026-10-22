@@ -26,11 +26,11 @@ G.Net = (() => {
       'turn:free.expressturn.com:3478?transport=udp',
       'turn:free.expressturn.com:3478?transport=tcp'
     ],
-    username: '貼上 Username',
-    credential: '貼上 Password'
+    username: '000000002107785014',
+    credential: '1jbvwy5Nu5gTaY2GhZlUpaA+mzg='
   }
   ];
-  const DIRECT_TIMEOUT = 9000;     // ms para conseguir canal directo antes de usar el relé
+  const DIRECT_TIMEOUT = 15000;     // ms para conseguir canal directo antes de usar el relé
   // Relé por la Realtime Database APAGADO (12-10-2026): a 1 $ el GB era lo que más
   // costaba del cooperativo. Sin conexión directa, esa pareja no puede jugar
   // junta ('failed') y el anfitrión lo reintenta cada RETRY_MS. Por la base de datos
