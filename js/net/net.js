@@ -62,6 +62,7 @@ G.Net = (() => {
   // caducar; si el servidor no las da (cuenta no autorizada, caído, sin red), no
   // se vuelve a preguntar en un rato y se juega sólo con STUN.
   let turn = null, turnUid = null, turnAsk = null, turnRetry = 0;
+  const TURN_KEEP = 80 * 60000;
 
   function cleanIce(list) {
     if (!Array.isArray(list)) return [];
@@ -82,7 +83,7 @@ G.Net = (() => {
   function turnNow() {
     const user = turnUser();
     if (!user) return [];
-    if (turn && turnUid === user.uid && turn.expiresAt * 1000 - Date.now() > 600000) return turn.iceServers;
+    if (turn && turnUid === user.uid && turn.expiresAt * 1000 - Date.now() > TURN_KEEP) return turn.iceServers;
     return Date.now() < turnRetry ? [] : null;
   }
 
