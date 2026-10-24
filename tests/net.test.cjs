@@ -147,7 +147,7 @@ test('real Coop.tick frames pass through the codec without changing gameplay fie
     assert.equal(sent.length, 1);
     assert.deepEqual(C.decode(C.encode(sent[0])), sent[0]);
     if (host) { assert.deepEqual(sent[0].e, [[123, 50, -10, 126, 1, 3, 1]]); assert.ok('ho' in sent[0]); }
-    else { assert.equal(sent[0].p.length, 16); assert.equal(sent[0].p[15], ''); }   // 16.º: a quién mira estando caído
+    else { assert.equal(sent[0].p.length, 17); assert.equal(sent[0].p[15], ''); assert.equal(sent[0].p[16], 1); }   // 16.º: a quién mira estando caído; 17.º: zoom (Luminosfera)
   }
 });
 
@@ -234,4 +234,109 @@ test('own TURN: a pair that needed it starts with it next time, and after 2 such
   b1.fail(); await settle();
   N.syncMembers(['host', 'a', 'b', 'c']); await settle();
   assert.equal(pcs.at(-1).cfg.iceServers.length, 2, 'two failures: own network needs TURN');
+});
+
+function coopWithCuts(host) {
+  let peerFn = null, msgFn = null;
+  const timers = new Map(), lost = [], said = [], dropped = [];
+  let mode = 'direct', nextT = 0;
+  const G = {};
+  G.Net = { uid: host ? 'host' : 'guest', on(fn) { msgFn = fn; }, onPeer(fn) { peerFn = fn; }, slow: () => false,
+    send() {}, toHost() {}, mode: () => mode };
+  G.Player = class { constructor() { this.maxHp = 300; } };
+  G.DEX_BY = { 25: { dex: 25 } }; G.baseStartOf = () => 'thundershock';
+  G.Sprites = { preload() {} }; G.U = { dist2: () => 0 };
+  G.Projectiles = { clearOrbs() {} }; G.Spawner = { say: s => said.push(s) };
+  G.Social = { me: { name: 'yo' }, dropMember: u => dropped.push(u) };
+  const setT = fn => { timers.set(++nextT, fn); return nextT; };
+  new Function('G', 'document', 'setTimeout', 'clearTimeout', source('js/net/coop.js'))(G, { addEventListener() {} }, setT, id => timers.delete(id));
+  G.Coop.begin({ host: 'host', members: [{ uid: 'host', name: 'Ana', dex: 25 }, { uid: 'guest', name: 'Bea', dex: 25 }] }, { x: 0, y: 0 },
+    { lost: m => lost.push(m), mateLeft() {}, waiting() {} });
+  const other = host ? 'guest' : 'host';
+  return {
+    G, lost, said, dropped, timers,
+    cut() { mode = 'failed'; peerFn(other, 'failed'); },
+    back() { mode = 'direct'; peerFn(other, 'direct'); },
+    expire() { for (const [id, fn] of [...timers]) { timers.delete(id); fn(); } },
+    bye() { msgFn(other, { k: 'f', ev: [['bye']] }); }
+  };
+}
+
+test('co-op cut mid-run: the guest waits for the host to reconnect instead of losing the run', () => {
+  const c = coopWithCuts(false);
+  c.cut();
+  assert.equal(c.lost.length, 0);
+  assert.ok(c.G.Coop.active);
+  c.back();
+  assert.equal(c.timers.size, 0);
+  c.expire();
+  assert.equal(c.lost.length, 0);
+  // a second cut that never comes back does end it, after the wait
+  c.cut(); c.cut();
+  assert.equal(c.timers.size, 1);
+  c.expire();
+  assert.equal(c.lost.length, 1);
+  assert.ok(!c.G.Coop.active);
+});
+
+test('co-op cut mid-run: the host keeps the guest while it reconnects and removes it only if it never does', () => {
+  const c = coopWithCuts(true);
+  c.cut();
+  assert.equal(c.G.Coop.puppets().length, 1);
+  assert.ok(c.G.Coop.keeps('guest'));
+  c.back();
+  assert.ok(c.said.some(s => s.includes('ha vuelto')));
+  c.cut(); c.expire();
+  assert.equal(c.G.Coop.puppets().length, 0);
+  assert.deepEqual(c.dropped, ['guest']);
+  // leaving on purpose during the wait never removes them from the room
+  const d = coopWithCuts(true);
+  d.cut(); d.bye(); d.expire();
+  assert.deepEqual(d.dropped, []);
+  assert.equal(d.G.Coop.puppets().length, 0);
+});
+
+test('co-op orbs: the host applies a guest orb only if the guest really has it, and buffs reach those nearby', () => {
+  let msgFn = null;
+  const G = {}, slept = [], slowed = [];
+  G.Net = { uid: 'host', on(fn) { msgFn = fn; }, onPeer() {}, slow: () => false, send() {}, toHost() {}, mode: () => 'direct' };
+  G.Player = class { constructor() { this.maxHp = 300; } };
+  G.DEX_BY = { 25: { dex: 25 } }; G.baseStartOf = () => 'thundershock';
+  G.Sprites = { preload() {} };
+  G.U = { dist2: (x, y, a, b) => (x - a) ** 2 + (y - b) ** 2, norm: (x, y) => { const d = Math.hypot(x, y) || 1; return [x / d, y / d]; },
+    pick: a => a[0] };
+  G.FX = { ring() {}, dmgText() {} }; G.Audio = { sfx() {} }; G.Spawner = { say() {} }; G.T = s => s;
+  G.Camera = { VIEW_W: 768, MIN_VIEW_H: 420, zoom: 1, zoomTo: 1 };
+  const foe = (id, x, boss) => ({ id, x, y: 0, boss, applySleep: d => slept.push([id, d]), applySlow: (f, d) => slowed.push([id, f, d]) });
+  G.EnemyMgr = { all: () => [foe(1, 100, false), foe(2, 120, true), foe(3, 5000, false)] };
+  const local = { x: 0, y: 0, dead: false, bodyH: 20, critChance: 0, spdMul: 1 };
+  G.Game = { player: local, state: 'playing' };
+  new Function('G', source('js/systems/orbs.js'))(G);
+  new Function('G', 'document', source('js/net/coop.js'))(G, { addEventListener() {} });
+  G.Coop.begin({ host: 'host', members: [{ uid: 'host', name: 'Ana', dex: 25 }, { uid: 'guest', name: 'Bea', dex: 25 }] }, local,
+    { lost() {}, mateLeft() {}, waiting() {} });
+  const guest = G.Coop.puppets()[0];
+  const use = (id, x = 0) => msgFn('guest', { k: 'f', ev: [['ou', id, x, 0, 1]] });
+
+  use('slumber');                                   // no la tiene: no pasa nada
+  assert.deepEqual(slept, []);
+  assert.ok(G.Orbs.add(guest, 'slumber'));          // la coge (el anfitrión lleva la cuenta)
+  use('slumber');
+  assert.deepEqual(slept, [[1, 4], [2, 1]]);         // los de su pantalla; el jefe, 1 s; el lejano, nada
+  use('slumber');                                   // ya la ha gastado
+  assert.equal(slept.length, 2);
+
+  G.Orbs.add(guest, 'quick');
+  use('quick', 5000);                               // lejos del anfitrión: a él no le llega
+  assert.equal(local.spdMul, 1);
+  G.Orbs.add(guest, 'quick');
+  use('quick', 100);                                // a menos de media pantalla: también para el anfitrión
+  assert.equal(local.spdMul, 1.4);
+
+  for (let i = 0; i < 3; i++) G.Orbs.add(guest, 'slow');
+  assert.ok(!G.Orbs.canTake(guest, 'slow'));         // 3 de cada como mucho
+  for (const id of ['focus', 'luminous']) G.Orbs.add(guest, id);
+  assert.ok(G.Orbs.canTake(guest, 'blowback'));      // (las dos Rapidosferas ya se gastaron: queda 1 hueco)
+  G.Orbs.add(guest, 'quick');
+  assert.ok(!G.Orbs.canTake(guest, 'blowback'));     // y 4 huecos
 });
